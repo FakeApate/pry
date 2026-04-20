@@ -142,10 +142,11 @@ func (s *scansTab) Update(msg tea.Msg) (tabView, tea.Cmd) {
 			items[i] = scanItem{scan: sc}
 		}
 		cmd := s.list.SetItems(items)
+		interval := idleRefreshInterval
 		if hasActive(s.scans) {
-			return s, tea.Batch(cmd, tickRefresh())
+			interval = activeRefreshInterval
 		}
-		return s, cmd
+		return s, tea.Batch(cmd, tickRefreshEvery(interval))
 
 	case refreshTickMsg:
 		return s, s.loadScans()
@@ -251,8 +252,13 @@ func (s *scansTab) deleteScan(scanID string) tea.Cmd {
 	}
 }
 
-func tickRefresh() tea.Cmd {
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+const (
+	activeRefreshInterval = 2 * time.Second
+	idleRefreshInterval   = 5 * time.Second
+)
+
+func tickRefreshEvery(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg {
 		return refreshTickMsg{}
 	})
 }

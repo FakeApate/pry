@@ -141,16 +141,43 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Open findings tab for a completed scan.
 	case openFindingsMsg:
+		// Findings tab already open for this scan?
+		existing := -1
 		for i, t := range m.tabs {
 			if ft, ok := t.(*findingsTab); ok && ft.scanID == msg.scanID {
-				m.activeTab = i
-				return m, nil
+				existing = i
+				break
 			}
 		}
-		ft := newFindingsTab(msg.scanID, msg.url, m.database)
-		m.tabs = append(m.tabs, ft)
-		m.activeTab = len(m.tabs) - 1
-		return m, ft.Init()
+
+		// Is the caller the matching active scan tab? If so, replace it.
+		replaceIdx := -1
+		if at, ok := m.tabs[m.activeTab].(*activeModel); ok && at.scanID == msg.scanID {
+			replaceIdx = m.activeTab
+		}
+
+		switch {
+		case existing >= 0 && replaceIdx >= 0:
+			// Close the scan tab and focus the existing findings tab.
+			m.tabs = append(m.tabs[:replaceIdx], m.tabs[replaceIdx+1:]...)
+			if existing > replaceIdx {
+				existing--
+			}
+			m.activeTab = existing
+			return m, nil
+		case existing >= 0:
+			m.activeTab = existing
+			return m, nil
+		case replaceIdx >= 0:
+			ft := newFindingsTab(msg.scanID, msg.url, m.database)
+			m.tabs[replaceIdx] = ft
+			return m, ft.Init()
+		default:
+			ft := newFindingsTab(msg.scanID, msg.url, m.database)
+			m.tabs = append(m.tabs, ft)
+			m.activeTab = len(m.tabs) - 1
+			return m, ft.Init()
+		}
 
 	case tea.KeyPressMsg:
 		// Input overlay consumes all key events when open.
@@ -218,12 +245,27 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Translate X to content-relative coordinates.
 		mouse.X -= leftPad
 
-		// Click in the tab bar area — switch tabs.
-		if click, isClick := msg.(tea.MouseClickMsg); isClick && click.Button == tea.MouseLeft && mouse.Y < tabBarH {
-			if idx := m.tabAtX(mouse.X); idx >= 0 {
-				m.activeTab = idx
+		// Click in the tab bar area — left switches tabs, middle closes.
+		if click, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Y < tabBarH {
+			if click.Button == tea.MouseLeft {
+				if idx := m.tabAtX(mouse.X); idx >= 0 {
+					m.activeTab = idx
+				}
+				return m, nil
 			}
-			return m, nil
+			if click.Button == tea.MouseMiddle {
+				idx := m.tabAtX(mouse.X)
+				if idx >= 0 && len(m.tabs) > 1 && m.tabs[idx].Closeable() {
+					m.tabs = append(m.tabs[:idx], m.tabs[idx+1:]...)
+					switch {
+					case m.activeTab > idx:
+						m.activeTab--
+					case m.activeTab >= len(m.tabs):
+						m.activeTab = len(m.tabs) - 1
+					}
+				}
+				return m, nil
+			}
 		}
 
 		// Translate Y to content-relative coordinates for the active tab.
@@ -357,6 +399,7 @@ func (m rootModel) renderHelp(width, height int) string {
 		hint("q/ctrl+c", "quit", dark),
 		hint("tab/shift+tab", "switch tabs", dark),
 		hint("ctrl+w", "close tab", dark),
+		hint("middle-click", "close tab from bar", dark),
 		hint("?", "toggle help", dark),
 		"",
 		lipgloss.NewStyle().Foreground(accent(dark)).Bold(true).Render("Scan List"),
