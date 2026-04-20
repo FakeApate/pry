@@ -133,14 +133,6 @@ make lint             # go vet ./...
 make generate         # regenerate SQLC code + JSON schema types
 ```
 
-Pre-commit hooks (gofmt, go vet, go mod tidy, standard file checks) are
-configured in [`.pre-commit-config.yaml`](.pre-commit-config.yaml). Install
-them once with:
-
-```sh
-pre-commit install
-```
-
 CI runs build, vet, `-race` tests, and a goreleaser snapshot build on every
 push and PR.
 
