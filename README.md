@@ -133,8 +133,9 @@ make lint             # go vet ./...
 make generate         # regenerate SQLC code + JSON schema types
 ```
 
-CI runs build, vet, `-race` tests, and a goreleaser snapshot build on every
-push and PR.
+CI runs build, vet, and `-race` tests on every push and PR. Publishing a
+GitHub release triggers the release workflow, which builds cross-platform
+binaries with goreleaser and uploads them as release assets.
 
 ## License
 
