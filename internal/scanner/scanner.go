@@ -21,6 +21,7 @@ import (
 	"github.com/gocolly/colly/v2/extensions"
 	"github.com/gocolly/colly/v2/proxy"
 	"github.com/fakeapate/pry/config"
+	"github.com/fakeapate/pry/internal/scanner/patterns"
 	"github.com/fakeapate/pry/model"
 )
 
@@ -183,28 +184,26 @@ func (w *Scanner) RunScan(ctx context.Context, scanID string, scanURL string) (m
 			return
 		}
 
-		title := doc.Find("head > title").Text()
-		firstHeader := doc.Find("h1").First().Text()
-
-		if !(title == firstHeader && firstHeader != "") {
-			log.Error("Open directory validation failed", "title", title, "h1", firstHeader)
+		headers := http.Header{}
+		if r.Headers != nil {
+			headers = *r.Headers
+		}
+		p := patterns.Detect(doc, headers)
+		if p == nil {
+			log.Error("Open directory validation failed", "url", r.Request.URL)
 			return
 		}
+		log.Debug("Matched index pattern", "pattern", p.Name(), "url", r.Request.URL)
 
-		doc.Find("a[href]").Each(func(_ int, sel *goquery.Selection) {
-			href, _ := sel.Attr("href")
-			if strings.HasPrefix(href, "?") {
-				return
-			}
-			if strings.HasSuffix(href, "/") {
-				visited := w.visitSubdir(r.Request, href)
-				if visited {
+		for _, e := range p.Entries(doc) {
+			if e.IsDir {
+				if w.visitSubdir(r.Request, e.Href) {
 					folderCount.Add(1)
 				} else {
 					skippedCount.Add(1)
 				}
 			} else {
-				u := w.filterFinding(*r.Request.URL.JoinPath(href))
+				u := w.filterFinding(*r.Request.URL.JoinPath(e.Href))
 				if u == "" {
 					skippedCount.Add(1)
 				} else {
@@ -213,7 +212,7 @@ func (w *Scanner) RunScan(ctx context.Context, scanID string, scanURL string) (m
 					mu.Unlock()
 				}
 			}
-		})
+		}
 	})
 
 	c.OnError(func(r *colly.Response, err error) {
