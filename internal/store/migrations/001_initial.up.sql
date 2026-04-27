@@ -19,9 +19,14 @@ CREATE TABLE scan_findings (
     scan_time      TEXT NOT NULL DEFAULT '',
     content_type   TEXT NOT NULL DEFAULT '',
     content_length INTEGER NOT NULL DEFAULT 0,
-    last_modified  TEXT
+    last_modified  TEXT,
+    category       TEXT NOT NULL DEFAULT '',
+    interest_score INTEGER NOT NULL DEFAULT 0,
+    tags           TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX idx_findings_scan_id ON scan_findings(scan_id);
 CREATE INDEX idx_findings_content_type ON scan_findings(scan_id, content_type);
 CREATE INDEX idx_findings_size ON scan_findings(scan_id, content_length);
+CREATE INDEX idx_findings_category ON scan_findings(scan_id, category);
+CREATE INDEX idx_findings_interest ON scan_findings(scan_id, interest_score);

@@ -184,19 +184,17 @@ func (s *scansTab) Update(msg tea.Msg) (tabView, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft && msg.Y >= 0 {
-			// Each item is 2 lines tall; compute which item was clicked
-			idx := s.list.Index() + (msg.Y-s.list.Index()*2)/2
-			// Simpler: just check if a valid item is at the click position
-			clickedIdx := msg.Y / 2
-			if clickedIdx >= 0 && clickedIdx < len(s.list.VisibleItems()) {
-				sc, ok := s.list.VisibleItems()[clickedIdx].(scanItem)
-				if ok {
+			// scanDelegate renders one line per item with zero spacing, so the
+			// click's Y coordinate (already translated to content-space) maps
+			// directly to a row index.
+			clickedIdx := msg.Y
+			if clickedIdx < len(s.list.VisibleItems()) {
+				if sc, ok := s.list.VisibleItems()[clickedIdx].(scanItem); ok {
 					return s, func() tea.Msg {
 						return openFindingsMsg{scanID: sc.scan.ScanID, url: sc.scan.Url}
 					}
 				}
 			}
-			_ = idx
 		}
 	}
 
@@ -214,9 +212,12 @@ func (s *scansTab) View(width, height int, dark bool) string {
 		return styleContent.Render(styleMuted(dark) + " Loading…")
 	}
 
-	s.dark = dark
-	// Update delegate with current dark mode
-	s.list.SetDelegate(scanDelegate{dark: dark})
+	// Only re-set the delegate when dark-mode changes, to avoid allocating
+	// one per render.
+	if s.dark != dark {
+		s.dark = dark
+		s.list.SetDelegate(scanDelegate{dark: dark})
+	}
 	s.list.SetWidth(width)
 	s.list.SetHeight(height)
 

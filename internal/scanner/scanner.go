@@ -7,7 +7,8 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
-	"path/filepath"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -76,7 +77,12 @@ func tagging(f *model.ScanFinding, headers *http.Header) {
 			if len(v) > 1 {
 				log.Debugf("Multiple values in header\n%s", v)
 			}
-			f.ContentLength, _ = strconv.ParseInt(v[0], 10, 64)
+			n, err := strconv.ParseInt(v[0], 10, 64)
+			if err != nil {
+				log.Warn("Malformed Content-Length header", "value", v[0], "url", f.Url, "err", err)
+			} else {
+				f.ContentLength = n
+			}
 		case "Content-Type":
 			if len(v) > 1 {
 				log.Debugf("Multiple values in header\n%s", v)
@@ -151,7 +157,10 @@ func (w *Scanner) RunScan(ctx context.Context, scanID string, scanURL string) (m
 		}
 	}
 
-	// Start progress reporter
+	// Start progress reporter. progressStop signals the goroutine to exit once
+	// the scan finishes, so the final emitProgress() below doesn't race with
+	// the ticker's own emitProgress() calls.
+	progressStop := make(chan struct{})
 	progressDone := make(chan struct{})
 	go func() {
 		defer close(progressDone)
@@ -161,17 +170,19 @@ func (w *Scanner) RunScan(ctx context.Context, scanID string, scanURL string) (m
 			select {
 			case <-ctx.Done():
 				return
+			case <-progressStop:
+				return
 			case <-ticker.C:
 				emitProgress()
 			}
 		}
 	}()
 
-	cancelled := false
+	var cancelled atomic.Bool
 	c.OnRequest(func(r *colly.Request) {
 		if ctx.Err() != nil {
 			r.Abort()
-			cancelled = true
+			cancelled.Store(true)
 			return
 		}
 		log.Debugf("Visiting %s", r.URL)
@@ -191,6 +202,7 @@ func (w *Scanner) RunScan(ctx context.Context, scanID string, scanURL string) (m
 		p := patterns.Detect(doc, headers)
 		if p == nil {
 			log.Error("Open directory validation failed", "url", r.Request.URL)
+			errorCount.Add(1)
 			return
 		}
 		log.Debug("Matched index pattern", "pattern", p.Name(), "url", r.Request.URL)
@@ -242,7 +254,7 @@ func (w *Scanner) RunScan(ctx context.Context, scanID string, scanURL string) (m
 	c.Visit(scanURL)
 	c.Wait()
 
-	if cancelled {
+	if cancelled.Load() {
 		return model.ScanResult{}, ctx.Err()
 	}
 
@@ -297,6 +309,8 @@ func (w *Scanner) RunScan(ctx context.Context, scanID string, scanURL string) (m
 	}
 	tagC.Wait()
 
+	close(progressStop)
+	<-progressDone
 	emitProgress()
 
 	stats := model.ScanStats{
@@ -313,26 +327,46 @@ func (w *Scanner) RunScan(ctx context.Context, scanID string, scanURL string) (m
 }
 
 func (w *Scanner) filterFinding(u url.URL) string {
-	ext := filepath.Ext(u.String())
+	ext := strings.ToLower(path.Ext(u.Path))
 	filetype := mime.TypeByExtension(ext)
 	for _, prefix := range w.cfg.SkipMimePrefixes {
 		if strings.HasPrefix(filetype, prefix) {
 			return ""
 		}
 	}
-	log.Debug("Adding finding", "file", filepath.Base(u.String()), "mime", filetype)
+	log.Debug("Adding finding", "file", path.Base(u.Path), "mime", filetype)
 	return u.String()
 }
 
-// visitSubdir visits href as a subdirectory and returns true if it was visited,
-// false if it was skipped due to a keyword match.
+// visitSubdir visits href as a subdirectory and returns true if it was visited.
+// Returns false on a keyword skip or when colly refuses the URL (already
+// visited, invalid, depth-capped, etc.) — the caller treats both as skipped.
 func (w *Scanner) visitSubdir(r *colly.Request, href string) bool {
-	abs := r.URL.JoinPath(href).String()
-	for _, keyword := range w.cfg.SkipSubdirKeywords {
-		if strings.Contains(abs, keyword) {
-			return false
+	target := r.URL.JoinPath(href)
+	if pathSegmentMatches(target.Path, w.cfg.SkipSubdirKeywords) {
+		return false
+	}
+	if err := r.Visit(href); err != nil {
+		log.Debug("Subdir visit refused", "url", target, "err", err)
+		return false
+	}
+	return true
+}
+
+// pathSegmentMatches reports whether any of keywords equals a path segment in
+// urlPath. Using segment equality avoids false positives like ".git" matching
+// hostnames or path fragments ("my.github.io", "logistics").
+func pathSegmentMatches(urlPath string, keywords []string) bool {
+	if len(keywords) == 0 {
+		return false
+	}
+	for seg := range strings.SplitSeq(urlPath, "/") {
+		if seg == "" {
+			continue
+		}
+		if slices.Contains(keywords, seg) {
+			return true
 		}
 	}
-	r.Visit(href)
-	return true
+	return false
 }

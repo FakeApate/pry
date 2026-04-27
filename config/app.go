@@ -48,7 +48,7 @@ func (c AppConfig) Validate() error {
 	return nil
 }
 
-var config AppConfig
+var config = DefaultAppConfig()
 
 func GetConfig() *AppConfig {
 	return &config

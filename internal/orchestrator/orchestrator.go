@@ -35,7 +35,7 @@ type Orchestrator struct {
 	queries    *db.Queries
 	cfg        config.AppConfig
 	ctx        context.Context
-	ctx_cancel context.CancelFunc
+	ctxCancel context.CancelFunc
 	wg         sync.WaitGroup
 	program    *tea.Program
 	programMu  sync.RWMutex
@@ -93,7 +93,7 @@ func newOrchestrator(ctx *context.Context) (*Orchestrator, error) {
 
 	o.cfg = *cfg
 	o.ctx = oCtx
-	o.ctx_cancel = cancel
+	o.ctxCancel = cancel
 	o.db = database
 	o.queries = db.New(database)
 	o.workerSem = make(chan struct{}, workers)
@@ -147,7 +147,7 @@ func (o *Orchestrator) Dispatch(u string) (string, error) {
 		}
 
 		if err := o.queries.UpdateScanStatus(ctx, db.UpdateScanStatusParams{ScanID: scanID, Status: "RUNNING"}); err != nil {
-			log.Error("Failed to mark scan RUNNING", "scan_id", scanID, "err", err)
+			o.failScan(ctx, job, fmt.Errorf("mark running: %w", err))
 			return
 		}
 		o.runScan(ctx, job)
@@ -163,7 +163,7 @@ func (o *Orchestrator) Wait() {
 
 // Close cancels all in-flight scans, waits for them to finish, then closes the DB.
 func (o *Orchestrator) Close() {
-	o.ctx_cancel()
+	o.ctxCancel()
 	o.wg.Wait()
 	o.db.Close()
 }
@@ -227,12 +227,16 @@ func (o *Orchestrator) failScan(ctx context.Context, job *scanJob, reason error)
 	o.send(model.ScanFailedEvent{ScanID: job.scanID, Reason: reason.Error()})
 }
 
-func (o *Orchestrator) persistFindings(ctx context.Context, scanID string, result model.ScanResult) error {
+func (o *Orchestrator) persistFindings(ctx context.Context, scanID string, result model.ScanResult) (err error) {
 	tx, err := o.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
 
 	qtx := o.queries.WithTx(tx)
 	for _, f := range result.Findings {
@@ -241,7 +245,7 @@ func (o *Orchestrator) persistFindings(ctx context.Context, scanID string, resul
 			lastMod = sql.NullString{String: f.LastModified.Format(time.RFC3339), Valid: true}
 		}
 		cl := classify.Classify(f.Url, f.ContentType, f.ContentLength)
-		if err := qtx.InsertScanFinding(ctx, db.InsertScanFindingParams{
+		if err = qtx.InsertScanFinding(ctx, db.InsertScanFindingParams{
 			ScanID:        scanID,
 			Url:           f.Url,
 			ScanTime:      f.ScanTime.Format(time.RFC3339),
@@ -260,14 +264,14 @@ func (o *Orchestrator) persistFindings(ctx context.Context, scanID string, resul
 	if err != nil {
 		return fmt.Errorf("marshal stats: %w", err)
 	}
-	if err := qtx.CompleteScan(ctx, db.CompleteScanParams{
+	if err = qtx.CompleteScan(ctx, db.CompleteScanParams{
 		ScanID: scanID,
 		Result: sql.NullString{String: string(statsJSON), Valid: true},
 	}); err != nil {
 		return fmt.Errorf("complete scan: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
 	return nil

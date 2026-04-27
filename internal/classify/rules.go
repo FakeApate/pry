@@ -216,16 +216,38 @@ var sensitivePatterns = []string{
 	"id_ed25519",
 }
 
-// backupPatterns are substrings in filenames that suggest backup files.
-var backupPatterns = []string{
+// backupExts are file extensions that always indicate a backup file.
+var backupExts = map[string]bool{
+	".bak":    true,
+	".old":    true,
+	".orig":   true,
+	".backup": true,
+	".bk":     true,
+	".swp":    true,
+	".save":   true,
+}
+
+// backupSubstrings are filename substrings long enough to be unambiguous
+// signals on their own.
+var backupSubstrings = []string{
 	"backup",
-	"bak",
-	"old",
-	"copy",
 	"snapshot",
 }
 
+// backupTokens are short markers that only count as backup signals when they
+// appear surrounded by token boundaries (start/end, '.', '-', '_'). Without
+// the boundary check they false-positive on common words ("folder" contains
+// "old", "copyright" contains "copy", etc.).
+var backupTokens = []string{
+	"bak",
+	"old",
+	"orig",
+	"copy",
+}
+
 // rareExts get a bonus interest score — files that are uncommon and worth investigating.
+// Common config extensions (.conf, .yaml, etc.) are intentionally excluded to
+// keep the noise floor low.
 var rareExts = map[string]bool{
 	".sql":      true,
 	".dump":     true,
@@ -233,7 +255,6 @@ var rareExts = map[string]bool{
 	".key":      true,
 	".pem":      true,
 	".bak":      true,
-	".conf":     true,
 	".htpasswd": true,
 	".shadow":   true,
 	".pgpass":   true,

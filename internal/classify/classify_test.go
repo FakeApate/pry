@@ -90,6 +90,16 @@ func TestClassifyTags(t *testing.T) {
 		{"backup in name", "https://example.com/backup-2026.zip", []string{"backup"}},
 		{"bak extension", "https://example.com/data.bak", []string{"backup"}},
 		{"old in name", "https://example.com/old-config.yaml", []string{"backup"}},
+		{"old as suffix token", "https://example.com/config_old.yaml", []string{"backup"}},
+		{"old extension", "https://example.com/config.old", []string{"backup"}},
+		{"orig token", "https://example.com/main.go.orig", []string{"backup"}},
+
+		// Regression: short backup tokens must not match inside unrelated words.
+		{"folder is not a backup", "https://example.com/folder.txt", nil},
+		{"gold is not a backup", "https://example.com/goldmine.png", nil},
+		{"bold is not a backup", "https://example.com/bold-text.txt", nil},
+		{"copyright is not a backup", "https://example.com/copyright.html", nil},
+		{"copyleft is not a backup", "https://example.com/copyleft.md", nil},
 		{"log file", "https://example.com/error.log", []string{"log"}},
 		{"error_log", "https://example.com/error_log", []string{"log"}},
 		{"access_log", "https://example.com/access_log", []string{"log"}},

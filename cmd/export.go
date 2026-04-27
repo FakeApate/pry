@@ -52,15 +52,13 @@ Use --last to export the most recent scan without typing its ID.`,
 			scans, err := queries.ListScans(ctx)
 			cobra.CheckErr(err)
 			if len(scans) == 0 {
-				fmt.Println("No scans found.")
-				os.Exit(1)
+				cobra.CheckErr(fmt.Errorf("no scans found"))
 			}
 			scanID = scans[0].ScanID
 		} else if len(args) > 0 {
 			scanID = args[0]
 		} else {
-			fmt.Println("Specify a scan ID or use --last")
-			os.Exit(1)
+			cobra.CheckErr(fmt.Errorf("specify a scan ID or use --last"))
 		}
 
 		scan, err := queries.GetScan(ctx, scanID)
@@ -71,7 +69,7 @@ Use --last to export the most recent scan without typing its ID.`,
 		result, err := fs.QueryFindings(ctx, store.FindingsFilter{
 			ScanID:   scanID,
 			Page:     1,
-			PageSize: 1000000,
+			PageSize: store.AllFindingsPageSize,
 			SortBy:   "url",
 		})
 		cobra.CheckErr(err)

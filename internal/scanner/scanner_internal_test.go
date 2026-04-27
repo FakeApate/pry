@@ -161,3 +161,33 @@ func TestFilterFindingCustomSkip(t *testing.T) {
 		t.Errorf("expected pdf to be filtered with custom skip rule")
 	}
 }
+
+func TestPathSegmentMatches(t *testing.T) {
+	kws := []string{".git", "node_modules", "venv"}
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"/repo/.git/", true},
+		{"/deep/nested/.git/objects/", true},
+		{"/node_modules/pkg/file.js", true},
+		{"/venv/", true},
+
+		// Regression: substring matches on path fragments or hostnames must
+		// not trip the filter.
+		{"/my.github.io/site/", false},
+		{"/logistics/", false},
+		{"/nodes/", false},
+		{"/venvironment/", false},
+		{"/just/a/path/", false},
+		{"/", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := pathSegmentMatches(tt.path, kws); got != tt.want {
+				t.Errorf("pathSegmentMatches(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}

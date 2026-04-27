@@ -5,7 +5,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/BurntSushi/toml"
 	"github.com/fakeapate/pry/config"
@@ -22,10 +21,7 @@ proxy settings, and database path.`,
   pry --config pry.toml scan https://example.com/`,
 	Run: func(cmd *cobra.Command, args []string) {
 		configBytes, err := toml.Marshal(config.DefaultAppConfig())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to marshal default config: %v\n", err)
-			os.Exit(1)
-		}
+		cobra.CheckErr(err)
 		fmt.Println(string(configBytes))
 	},
 }

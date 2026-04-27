@@ -62,11 +62,8 @@ func computeTags(ext string, filenameLower string) []string {
 		}
 	}
 
-	for _, p := range backupPatterns {
-		if strings.Contains(filenameLower, p) {
-			tags = append(tags, "backup")
-			break
-		}
+	if isBackup(ext, filenameLower) {
+		tags = append(tags, "backup")
 	}
 
 	if ext == ".log" || strings.Contains(filenameLower, "error_log") || strings.Contains(filenameLower, "access_log") {
@@ -130,6 +127,49 @@ func extractFilename(rawURL string) string {
 func hasTag(tags []string, tag string) bool {
 	for _, t := range tags {
 		if t == tag {
+			return true
+		}
+	}
+	return false
+}
+
+// isBackup reports whether the file looks like a backup, using a backup-only
+// extension, a substring long enough to be unambiguous, or a short token
+// matched against word boundaries.
+func isBackup(ext, filenameLower string) bool {
+	if backupExts[ext] {
+		return true
+	}
+	for _, s := range backupSubstrings {
+		if strings.Contains(filenameLower, s) {
+			return true
+		}
+	}
+	for _, tok := range backupTokens {
+		if containsToken(filenameLower, tok) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsToken reports whether token appears in s as a standalone token —
+// surrounded by start/end-of-string or any of '.', '-', '_'.
+func containsToken(s, token string) bool {
+	if token == "" || len(token) > len(s) {
+		return false
+	}
+	isSep := func(b byte) bool {
+		return b == '.' || b == '-' || b == '_'
+	}
+	for i := 0; i+len(token) <= len(s); i++ {
+		if s[i:i+len(token)] != token {
+			continue
+		}
+		leftOK := i == 0 || isSep(s[i-1])
+		end := i + len(token)
+		rightOK := end == len(s) || isSep(s[end])
+		if leftOK && rightOK {
 			return true
 		}
 	}

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/url"
 	"os"
 
 	tea "charm.land/bubbletea/v2"
@@ -60,14 +59,7 @@ and ` + "`config generate`" + ` prints the default configuration.`,
 			os.Exit(1)
 		}
 	},
-	Args: func(cmd *cobra.Command, args []string) error {
-		for _, v := range args {
-			if _, err := url.ParseRequestURI(v); err != nil {
-				return err
-			}
-		}
-		return nil
-	},
+	Args: cobra.NoArgs,
 }
 
 func Execute() {

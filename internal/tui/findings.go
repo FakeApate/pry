@@ -379,7 +379,7 @@ func (f *findingsTab) loadAllFindings() tea.Cmd {
 		result, err := fs.QueryFindings(context.Background(), store.FindingsFilter{
 			ScanID:   scanID,
 			Page:     1,
-			PageSize: 100000,
+			PageSize: store.AllFindingsPageSize,
 			SortBy:   "url",
 		})
 		if err != nil {
@@ -395,7 +395,7 @@ func (f *findingsTab) exportHTML() tea.Cmd {
 	scanURL := f.url
 	return func() tea.Msg {
 		result, err := fs.QueryFindings(context.Background(), store.FindingsFilter{
-			ScanID: scanID, Page: 1, PageSize: 1000000, SortBy: "url",
+			ScanID: scanID, Page: 1, PageSize: store.AllFindingsPageSize, SortBy: "url",
 		})
 		if err != nil {
 			return exportDoneMsg{err: err}

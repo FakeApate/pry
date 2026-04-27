@@ -22,6 +22,11 @@ type FindingsFilter struct {
 	PageSize     int
 }
 
+// AllFindingsPageSize is the page size callers use to load an entire scan's
+// findings in one shot (tree build, export). It is an upper bound rather than
+// a soft cap; callers that hit it silently truncate the result.
+const AllFindingsPageSize = 1_000_000
+
 type Finding struct {
 	URL           string
 	ScanTime      time.Time
@@ -55,18 +60,22 @@ var allowedSortColumns = map[string]string{
 	"interest_score": "interest_score",
 }
 
+// likeEscaper escapes the LIKE wildcards ('%' and '_') so search queries only
+// match literal characters. Pairs with `ESCAPE '\'` in the generated SQL.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
 func (s *FindingsStore) QueryFindings(ctx context.Context, f FindingsFilter) (FindingsResult, error) {
 	var conditions []string
-	var args []any
+	var whereArgs []any
 
 	conditions = append(conditions, "scan_id = ?")
-	args = append(args, f.ScanID)
+	whereArgs = append(whereArgs, f.ScanID)
 
 	if len(f.ContentTypes) > 0 {
 		placeholders := make([]string, len(f.ContentTypes))
 		for i, ct := range f.ContentTypes {
 			placeholders[i] = "?"
-			args = append(args, ct)
+			whereArgs = append(whereArgs, ct)
 		}
 		conditions = append(conditions, fmt.Sprintf("content_type IN (%s)", strings.Join(placeholders, ", ")))
 	}
@@ -74,25 +83,25 @@ func (s *FindingsStore) QueryFindings(ctx context.Context, f FindingsFilter) (Fi
 		placeholders := make([]string, len(f.Categories))
 		for i, cat := range f.Categories {
 			placeholders[i] = "?"
-			args = append(args, cat)
+			whereArgs = append(whereArgs, cat)
 		}
 		conditions = append(conditions, fmt.Sprintf("category IN (%s)", strings.Join(placeholders, ", ")))
 	}
 	if f.MinInterest != nil {
 		conditions = append(conditions, "interest_score >= ?")
-		args = append(args, *f.MinInterest)
+		whereArgs = append(whereArgs, *f.MinInterest)
 	}
 	if f.MinSize != nil {
 		conditions = append(conditions, "content_length >= ?")
-		args = append(args, *f.MinSize)
+		whereArgs = append(whereArgs, *f.MinSize)
 	}
 	if f.MaxSize != nil {
 		conditions = append(conditions, "content_length <= ?")
-		args = append(args, *f.MaxSize)
+		whereArgs = append(whereArgs, *f.MaxSize)
 	}
 	if f.Query != nil {
-		conditions = append(conditions, "url LIKE ?")
-		args = append(args, "%"+*f.Query+"%")
+		conditions = append(conditions, `url LIKE ? ESCAPE '\'`)
+		whereArgs = append(whereArgs, "%"+likeEscaper.Replace(*f.Query)+"%")
 	}
 
 	where := strings.Join(conditions, " AND ")
@@ -116,9 +125,9 @@ func (s *FindingsStore) QueryFindings(ctx context.Context, f FindingsFilter) (Fi
 		LIMIT ? OFFSET ?`,
 		where, sortCol, sortDir,
 	)
-	args = append(args, f.PageSize, offset)
+	pageArgs := append(append([]any{}, whereArgs...), f.PageSize, offset)
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.db.QueryContext(ctx, query, pageArgs...)
 	if err != nil {
 		return FindingsResult{}, err
 	}
@@ -147,10 +156,12 @@ func (s *FindingsStore) QueryFindings(ctx context.Context, f FindingsFilter) (Fi
 		return FindingsResult{}, err
 	}
 
+	// Window-function totals are 0 when no rows came back; re-run the count
+	// with the WHERE-clause args only (no pagination args).
 	if len(result.Findings) == 0 {
 		var count int
 		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM scan_findings WHERE %s", where)
-		if err := s.db.QueryRowContext(ctx, countQuery, args[:len(args)-2]...).Scan(&count); err != nil {
+		if err := s.db.QueryRowContext(ctx, countQuery, whereArgs...).Scan(&count); err != nil {
 			return FindingsResult{}, err
 		}
 		result.Total = count

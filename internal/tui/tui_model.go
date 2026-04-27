@@ -26,6 +26,7 @@ type rootModel struct {
 	inputOpen bool
 	inputView inputModel
 	showHelp  bool
+	flashMsg  string // transient error banner; cleared on next key press
 }
 
 func NewModel(database *sql.DB, dispatch DispatchFunc) rootModel {
@@ -124,7 +125,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// New scan dispatched: open an active scan tab.
 	case scanDispatchedMsg:
 		if msg.err != nil {
-			// TODO: surface error in a status line
+			m.flashMsg = "dispatch failed: " + msg.err.Error()
 			return m, nil
 		}
 		at := newActiveModel(msg.scanID, msg.url)
@@ -180,6 +181,8 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyPressMsg:
+		// Any key press dismisses the flash banner.
+		m.flashMsg = ""
 		// Input overlay consumes all key events when open.
 		if m.inputOpen {
 			if key.Matches(msg, key.NewBinding(key.WithKeys("esc"))) {
@@ -322,7 +325,17 @@ func (m rootModel) View() tea.View {
 	footer := m.renderFooter(innerW)
 	footerH := lipgloss.Height(footer)
 
-	contentH := max(m.height-tabBarH-footerH, 1)
+	var flash string
+	var flashH int
+	if m.flashMsg != "" {
+		flash = lipgloss.NewStyle().
+			Foreground(errorC(m.hasDarkBg)).
+			Width(innerW).
+			Render(" " + m.flashMsg)
+		flashH = lipgloss.Height(flash)
+	}
+
+	contentH := max(m.height-tabBarH-footerH-flashH, 1)
 	content := m.tabs[m.activeTab].View(innerW, contentH, m.hasDarkBg)
 
 	// Input overlay
@@ -335,7 +348,12 @@ func (m rootModel) View() tea.View {
 		content = m.renderHelp(innerW, contentH)
 	}
 
-	inner := lipgloss.JoinVertical(lipgloss.Left, tabBar, content, footer)
+	var inner string
+	if flash != "" {
+		inner = lipgloss.JoinVertical(lipgloss.Left, tabBar, content, flash, footer)
+	} else {
+		inner = lipgloss.JoinVertical(lipgloss.Left, tabBar, content, footer)
+	}
 	if leftPad > 0 {
 		inner = lipgloss.NewStyle().PaddingLeft(leftPad).Render(inner)
 	}

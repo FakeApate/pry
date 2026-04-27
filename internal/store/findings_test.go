@@ -217,6 +217,57 @@ func TestQueryFindingsFilterQuery(t *testing.T) {
 	}
 }
 
+func TestQueryFindingsFilterQueryEscaping(t *testing.T) {
+	db := openMemDB(t)
+	if err := store.MigrateUp(db); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert a scan and two findings whose names differ by a literal underscore.
+	_, err := db.Exec("INSERT INTO scans (scan_id, url, status) VALUES ('scan-esc', 'https://example.com/', 'DONE')")
+	if err != nil {
+		t.Fatal(err)
+	}
+	urls := []string{
+		"https://example.com/report_v1.pdf",
+		"https://example.com/report1v1.pdf",
+	}
+	for _, u := range urls {
+		if _, err := db.Exec(
+			"INSERT INTO scan_findings (scan_id, url, scan_time, content_type, content_length, last_modified) VALUES (?, ?, ?, ?, ?, ?)",
+			"scan-esc", u, "2026-04-10T10:00:00Z", "application/pdf", 1, "",
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fs := store.NewFindingsStore(db)
+
+	// Underscore must match a literal '_' only, not any single character.
+	q := "report_"
+	result, err := fs.QueryFindings(context.Background(), store.FindingsFilter{
+		ScanID: "scan-esc", Query: &q, Page: 1, PageSize: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 {
+		t.Errorf("expected 1 match for literal underscore, got %d", result.Total)
+	}
+
+	// Percent sign must likewise be literal.
+	q = "%"
+	result, err = fs.QueryFindings(context.Background(), store.FindingsFilter{
+		ScanID: "scan-esc", Query: &q, Page: 1, PageSize: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 0 {
+		t.Errorf("expected 0 matches for literal '%%', got %d", result.Total)
+	}
+}
+
 func TestQueryFindingsSortBySize(t *testing.T) {
 	db := openMemDB(t)
 	if err := store.MigrateUp(db); err != nil {
